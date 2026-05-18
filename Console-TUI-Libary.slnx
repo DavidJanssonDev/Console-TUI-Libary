@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Console-TUI-Example-Project/Console-TUI-Example-Project.csproj" />
+  <Project Path="Console-TUI-Libary/Console-TUI-Libary.csproj" />
+</Solution>
