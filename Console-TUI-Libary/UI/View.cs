@@ -10,35 +10,26 @@ public abstract class View
 {
     public List<View> Children { get; } = new();
 
-    public View? Parent { get; private set; }
-
-    public int X { get; set; }
-    public int Y { get; set; }
-
-    public void AddChild(View child)
+    public void Add(params View[] views)
     {
-        child.Parent = this;
-        Children.Add(child);
+        foreach (var v in views)
+            Children.Add(v);
     }
 
-    public virtual void Update()
-    {
-        foreach (var child in Children)
-            child.Update();
-    }
+    public virtual void Update() { }
 
-    public void Render(Buffer buffer, int offsetX = 0, int offsetY = 0)
+    public void Render(Buffer buffer, int x, int y)
     {
-        Draw(buffer, offsetX, offsetY);
+        Draw(buffer, x, y);
 
-        int yOffset = 0;
+        int offsetY = 1;
 
         foreach (var child in Children)
         {
-            child.Render(buffer, offsetX, offsetY + yOffset);
-            yOffset += 1; // 🔥 stack vertically
+            child.Render(buffer, x, y + offsetY);
+            offsetY += 1;
         }
     }
 
-    protected abstract void Draw(Buffer buffer, int offsetX, int offsetY);
+    protected abstract void Draw(Buffer buffer, int x, int y);
 }

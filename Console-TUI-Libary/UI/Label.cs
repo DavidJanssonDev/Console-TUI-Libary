@@ -6,20 +6,23 @@ using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.UI;
 
-public class Label : View
+public class Label : Component
 {
-    public string Text { get; set; }
+    public string Text;
 
     public Label(string text)
     {
         Text = text;
     }
 
-    protected override void Draw(Buffer buffer, int offsetX, int offsetY)
+    protected override void Draw(Buffer buffer, int x, int y)
     {
+        if (string.IsNullOrEmpty(Text))
+            return;
+
         for (int i = 0; i < Text.Length; i++)
         {
-            buffer.Set(offsetX + i, offsetY, Text[i]);
+            buffer.Set(x + i, y, Text[i]);
         }
     }
 }

@@ -6,7 +6,7 @@ using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.UI;
 
-public class RootView : View
+public class ViewRoot : View
 {
     protected override void Draw(Buffer buffer, int offsetX, int offsetY)
     {

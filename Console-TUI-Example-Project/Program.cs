@@ -1,3 +1,7 @@
-﻿using TuiEngineExample.App;
+﻿using TuiEngine.Core;
+using TuiEngine.UI;
 
-new HelloApp().Run();
+Tui.Run(
+    new Label("Welcome to the Console TUI Example!"),
+    new NumberCounter()
+);
