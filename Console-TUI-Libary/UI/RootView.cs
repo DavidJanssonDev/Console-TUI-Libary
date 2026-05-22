@@ -6,10 +6,11 @@ using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.UI;
 
-public class ViewRoot : View
+internal class RootView : View
 {
-    protected override void Draw(Buffer buffer, int offsetX, int offsetY)
+    public override void Render(Buffer buffer, int x, int y)
     {
-        buffer.Clear();
+        buffer.Clear(); // ONLY HERE
+        base.Render(buffer, x, y);
     }
 }

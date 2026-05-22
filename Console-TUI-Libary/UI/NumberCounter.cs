@@ -9,21 +9,23 @@ public class NumberCounter : Component
 {
     private int value = 0;
 
-    private string cachedText = "";
+    private string cached;
+
 
     public override void OnUpdate()
     {
-        // simple demo logic: increment every frame
         value++;
 
-        cachedText = $"Counter: {value}";
+        cached = $"Counter: {value}";
+
+        MarkDirty(); // 🔥 ONLY WHEN VALUE CHANGES
     }
 
-    protected override void Draw(Buffer buffer, int x, int y)
+    public override void Draw(Rendering.Buffer buffer, int x, int y)
     {
-        for (int i = 0; i < cachedText.Length; i++)
+        for (int i = 0; i < cached.Length; i++)
         {
-            buffer.Set(x + i, y, cachedText[i]);
+            buffer.Set(x + i, y, cached[i]);
         }
     }
 }

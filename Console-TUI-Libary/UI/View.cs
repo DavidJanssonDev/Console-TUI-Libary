@@ -16,11 +16,13 @@ public abstract class View
             Children.Add(v);
     }
 
-    public virtual void Update() { }
-
-    public void Render(Buffer buffer, int x, int y)
+    public virtual void Render(Buffer buffer, int x, int y)
     {
-        Draw(buffer, x, y);
+        if (this is Component c)
+        {
+            c.Draw(buffer, x, y);
+            c.ClearDirty();
+        }
 
         int offsetY = 1;
 
@@ -30,6 +32,4 @@ public abstract class View
             offsetY += 1;
         }
     }
-
-    protected abstract void Draw(Buffer buffer, int x, int y);
 }

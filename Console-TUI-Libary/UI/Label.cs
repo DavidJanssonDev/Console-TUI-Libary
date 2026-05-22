@@ -8,18 +8,34 @@ namespace TuiEngine.UI;
 
 public class Label : Component
 {
-    public string Text;
+    private string text;
+
+    public string Text
+    {
+        get => text;
+
+        set
+        {
+            if (text != value)
+            {
+                text = value;
+                MarkDirty();
+            }
+        }
+    }
 
     public Label(string text)
     {
         Text = text;
     }
-
-    protected override void Draw(Buffer buffer, int x, int y)
+    
+    public override void OnUpdate()
     {
-        if (string.IsNullOrEmpty(Text))
-            return;
+        // static label → nothing needed
+    }
 
+    public override void Draw(Buffer buffer, int x, int y)
+    {
         for (int i = 0; i < Text.Length; i++)
         {
             buffer.Set(x + i, y, Text[i]);

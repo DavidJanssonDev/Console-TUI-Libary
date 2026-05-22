@@ -11,7 +11,7 @@ public static class Tui
 {
     public static void Run(params View[] rootChildren)
     {
-        var root = new ViewRoot();
+        var root = new RootView();
         root.Add(rootChildren);
 
         var engine = new Engine(root);
