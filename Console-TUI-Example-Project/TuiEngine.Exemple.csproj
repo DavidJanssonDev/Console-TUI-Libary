@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Console-TUI-Libary\Console-TUI-Libary.csproj" />
+    <ProjectReference Include="..\Console-TUI-Libary\TuiEngine.csproj" />
   </ItemGroup>
 
 </Project>

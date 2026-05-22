@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace TuiEngine;
+namespace ConsoleTUILibary.Input;
 
 public static class Input
 {

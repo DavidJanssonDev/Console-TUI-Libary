@@ -1,3 +1,3 @@
-﻿using Console_TUI_Example_Project;
+﻿using TuiEngineExample.App;
 
-new DemoApp().Run();
+new HelloApp().Run();
