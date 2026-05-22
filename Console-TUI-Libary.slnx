@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+    <File Path="ROADMAP.md" />
+  </Folder>
   <Project Path="Console-TUI-Example-Project/Console-TUI-Example-Project.csproj" />
   <Project Path="Console-TUI-Libary/Console-TUI-Libary.csproj" />
 </Solution>
