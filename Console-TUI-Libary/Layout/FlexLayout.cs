@@ -13,6 +13,4 @@ public class FlexLayout
     }
 
     public Direction Flow { get; set; } = Direction.Column;
-
-    public int Spacing { get; set; } = 0;
 }

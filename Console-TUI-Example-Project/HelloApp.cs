@@ -10,14 +10,14 @@ namespace TuiEngineExample.App;
 public class HelloApp : TuiApp
 {
     private int counter = 0;
-    private Label counterLabel;
+    private Label label;
 
     protected override void Initialize()
     {
         Root.AddChild(new Label("Hello TuiEngine!"));
 
-        counterLabel = new Label("Counter: 0");
-        Root.AddChild(counterLabel);
+        label = new Label("Counter: 0");
+        Root.AddChild(label);
     }
 
     protected override void HandleInput()
@@ -26,15 +26,10 @@ public class HelloApp : TuiApp
 
         var key = Console.ReadKey(true).Key;
 
-        if (key == ConsoleKey.Escape)
-            Environment.Exit(0);
-
         if (key == ConsoleKey.Spacebar)
         {
             counter++;
-            counterLabel.Text = $"Counter: {counter}";
-
-            Root.MarkDirty(); // 🔥 THIS is the ONLY trigger needed
+            label.Text = $"Counter: {counter}";
         }
     }
 }

@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-
 using TuiEngine.Core;
+using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.UI;
 
@@ -15,9 +15,11 @@ public class Label : View
         Text = text;
     }
 
-    public override void Render(ScreenBuffer screen)
+    protected override void Draw(Buffer buffer, int offsetX, int offsetY)
     {
-        screen.WriteLine(Text);
-        base.Render(screen);
+        for (int i = 0; i < Text.Length; i++)
+        {
+            buffer.Set(offsetX + i, offsetY, Text[i]);
+        }
     }
 }

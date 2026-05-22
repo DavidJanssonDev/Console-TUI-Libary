@@ -1,20 +1,27 @@
-﻿using System;
+﻿using TuiEngine.Rendering;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using TuiEngine.UI;
+using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.Core;
 
 public abstract class TuiApp
 {
-    protected ScreenBuffer Screen { get; private set; }
-    protected RootView Root { get; private set; }
+    protected Buffer BackBuffer;
+    protected Buffer FrontBuffer;
+    protected RootView Root;
 
     private bool running = true;
 
     protected TuiApp()
     {
-        Screen = new ScreenBuffer();
+        int width = Console.WindowWidth;
+        int height = Console.WindowHeight;
+
+        BackBuffer = new Buffer(width, height);
+        FrontBuffer = new Buffer(width, height);
         Root = new RootView();
     }
 
@@ -27,12 +34,7 @@ public abstract class TuiApp
             HandleInput();
             Update();
 
-            if (Root.ConsumeDirty())
-            {
-                Render();
-            }
-
-            Thread.Sleep(16);
+            Render();
         }
     }
 
@@ -43,18 +45,6 @@ public abstract class TuiApp
         Root.Update();
     }
 
-    protected virtual void Render()
-    {
-        Screen.Clear();
-        Root.Render(Screen);
-        Screen.Present();
-    }
-
-    protected void RequestRender()
-    {
-        Render();
-    }
-
     protected virtual void HandleInput()
     {
         if (!Console.KeyAvailable) return;
@@ -63,5 +53,14 @@ public abstract class TuiApp
 
         if (key == ConsoleKey.Escape)
             running = false;
+    }
+
+    private void Render()
+    {
+        BackBuffer.Clear();
+
+        Root.Render(BackBuffer, 0, 0);
+
+        Renderer.DiffRender(BackBuffer, FrontBuffer);
     }
 }

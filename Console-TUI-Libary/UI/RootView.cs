@@ -1,26 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-
 using TuiEngine.Core;
+using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.UI;
 
 public class RootView : View
 {
-    private bool isDirty = true;
-
-    public void MarkDirty()
+    protected override void Draw(Buffer buffer, int offsetX, int offsetY)
     {
-        isDirty = true;
-    }
-
-    public bool ConsumeDirty()
-    {
-        if (!isDirty)
-            return false;
-
-        isDirty = false;
-        return true;
+        buffer.Clear();
     }
 }

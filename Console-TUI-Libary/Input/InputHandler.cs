@@ -6,7 +6,7 @@ namespace TuiEngine.Input;
 
 public class InputHandler
 {
-    public ConsoleKey? ReadKey()
+    public ConsoleKey? GetKey()
     {
         if (!Console.KeyAvailable)
             return null;

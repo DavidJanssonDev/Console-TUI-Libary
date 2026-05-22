@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace TuiEngine.Core
+namespace TuiEngine.Core;
+
+public static class Time
 {
-    internal class Time
-    {
-    }
+    public static float DeltaTime { get; internal set; }
 }
