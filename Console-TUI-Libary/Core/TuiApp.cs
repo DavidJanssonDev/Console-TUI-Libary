@@ -27,8 +27,12 @@ public abstract class TuiApp
             HandleInput();
             Update();
 
-            Render();
-            Thread.Sleep(16); // ~60 FPS cap
+            if (Root.ConsumeDirty())
+            {
+                Render();
+            }
+
+            Thread.Sleep(16);
         }
     }
 
@@ -41,9 +45,14 @@ public abstract class TuiApp
 
     protected virtual void Render()
     {
-        Screen.BeginFrame();   // 👈 important
+        Screen.Clear();
         Root.Render(Screen);
-        Screen.EndFrame();     // 👈 important
+        Screen.Present();
+    }
+
+    protected void RequestRender()
+    {
+        Render();
     }
 
     protected virtual void HandleInput()

@@ -8,8 +8,19 @@ namespace TuiEngine.UI;
 
 public class RootView : View
 {
-    public override void Render(ScreenBuffer screen)
+    private bool isDirty = true;
+
+    public void MarkDirty()
     {
-        base.Render(screen);
+        isDirty = true;
+    }
+
+    public bool ConsumeDirty()
+    {
+        if (!isDirty)
+            return false;
+
+        isDirty = false;
+        return true;
     }
 }
