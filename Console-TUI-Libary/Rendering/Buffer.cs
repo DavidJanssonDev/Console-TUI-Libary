@@ -27,11 +27,10 @@ public class Buffer
             Cells[x, y] = new Cell(' ');
     }
 
-    public void Set(int x, int y, char c)
+    public void Set(int x, int y, char c, ConsoleColor fg = ConsoleColor.Gray, ConsoleColor bg = ConsoleColor.Black)
     {
-        if (x < 0 || y < 0 || x >= Width || y >= Height)
-            return;
+        if (x < 0 || y < 0 || x >= Width || y >= Height) return;
 
-        Cells[x, y] = new Cell(c);
+        Cells[x, y] = new Cell(c, fg, bg);
     }
 }

@@ -8,19 +8,24 @@ namespace TuiEngine.Rendering;
 public struct Cell
 {
     public char Char;
+    public ConsoleColor Foreground;
+    public ConsoleColor Background;
 
-    public Cell(char c)
+    public static readonly Cell Empty = new(' ', ConsoleColor.Gray, ConsoleColor.Black);
+
+    public Cell(char c, ConsoleColor fg = ConsoleColor.Gray, ConsoleColor bg = ConsoleColor.Black)
     {
         Char = c;
+        Foreground = fg;
+        Background = bg;
     }
 
     public override bool Equals(object? obj)
-    {
-        return obj is Cell cell && Char == cell.Char;
-    }
+           => obj is Cell cell
+              && Char == cell.Char
+              && Foreground == cell.Foreground
+              && Background == cell.Background;
 
     public override int GetHashCode()
-    {
-        return Char.GetHashCode();
-    }
+            => HashCode.Combine(Char, Foreground, Background);
 }
