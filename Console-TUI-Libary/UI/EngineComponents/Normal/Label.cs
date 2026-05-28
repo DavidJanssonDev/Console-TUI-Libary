@@ -5,7 +5,7 @@ using TuiEngine.Core;
 using TuiEngine.Input;
 using Buffer = TuiEngine.Rendering.Buffer;
 
-namespace TuiEngine.UI;
+namespace TuiEngine.UI.EngineComponents.Normal;
 
 public class Label : Component
 {

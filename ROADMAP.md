@@ -1,558 +1,73 @@
-# TUI Engine — Menu Roadmap (v2)
+# TUI Engine — Follow-Up Roadmap
 
-A step-by-step build plan from the current render loop to a fully navigable,
-keyboard-driven menu in the Unity UI Toolkit style — with explicit keybinds,
-no universal Tab navigation, and a two-zone layout (UI area + status bar).
+Picks up exactly where the first roadmap left off.
+The menu runs. The problems visible in the screenshot are:
 
----
+- `Console.WriteLine` inside callbacks bleeds into the rendered terminal (text appears mid-screen,
+  unstyled, outside the buffer)
+- Menu items and their callback output appear on the same line — layout is off
+- No Unity UI Toolkit feel — the developer just stacks `new MenuItem(...)` into `new Menu(...)` 
+  with no config object, no style binding, no forced contract
+- Tab is a global shortcut the developer did not choose — it should not exist
+- Arrow keys are hardcoded; the developer has no say in what "move up" means for their game
 
-## What changed from v1
-
-| Topic | v1 | v2 |
-|---|---|---|
-| Focus cycling | Universal `Tab` key | Removed. No Tab anywhere. |
-| Navigation keys | Hardcoded `UpArrow / DownArrow / Enter` inside `Menu` | Developer **must** pass a `MenuKeys` struct — compile error if omitted |
-| Entering a menu | Required Tab to reach the Menu first | First `Up` or `Down` press auto-focuses the nearest Menu |
-| Layout | Single flat list of children | Two-zone layout: content area + status bar (from the sketch) |
-| Callback side-effects | `Console.WriteLine` bleeds into the render buffer | Callbacks are deferred and routed to the status bar instead |
+These four phases fix all of it.
 
 ---
 
-## Current state (baseline)
+## What is wrong in the screenshot (Image 2)
 
-| Area | What exists | What is missing |
-|---|---|---|
-| Loop | `Engine.Run()` 16 ms sleep | `Time.DeltaTime` never set; only Escape handled |
-| Input | `InputHandler`, `KeyEvent` | Neither connected to `Engine` |
-| Rendering | `Buffer`, `Cell`, `Renderer.DiffRender` | `Cell` has no color; no ANSI color codes emitted |
-| UI | `View`, `Component`, `Label`, `NumberCounter` | No focus, no selection, no interactive components |
-| Layout | `FlexLayout` data class | Layout math hardcoded as `offsetY += 1` in `View.Render` |
+```
+=== Main Menu ===
+
+ New game  Starting new game...
+ Load game Loading game...
+ Options   Opening options...
+[Quit]
+```
+
+The text `Starting new game...` etc. is coming from `Console.WriteLine` inside the callbacks.
+Because the buffer-based renderer does not own the full console write stream, any raw
+`Console.Write/WriteLine` call bypasses the buffer entirely and appears wherever the cursor
+happens to be. This is not a rendering bug — it is an architectural rule that must be enforced:
+**nothing in a TUI app should ever call `Console.Write` directly after the engine starts.**
+Phase 6 fixes this by giving the developer a proper output surface.
 
 ---
 
-## Phase 1 — Wire input into the engine loop
+## Phase 6 — Kill `Console.Write` in callbacks; add a StatusBar
 
-### Goal
-The engine collects every key pressed this frame into a list and passes it down
-the component tree. No component polls the console directly.
+### The problem
+The engine uses ANSI cursor positioning (`\x1b[y;xH`) to draw into a buffer.
+Any raw `Console.WriteLine` call writes at the current physical cursor position,
+which is wherever the last ANSI move left it. This corrupts the layout.
 
-### Problem in the current code
-```csharp
-// Engine.Run() today — reads ONE key and throws it away
-if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.Escape)
-    break;
+### What Image 1 is describing
+The sketch shows two regions:
+
 ```
-`InputHandler` and `KeyEvent` exist but are never used. `Time.DeltaTime` is
-declared but never written.
-
-### What to build
-
-**1. Engine collects all keys per frame and sets delta time**
-
-```csharp
-// Engine.cs
-private DateTime lastTick = DateTime.UtcNow;
-
-public void Run()
-{
-    Console.CursorVisible = false;
-
-    while (true)
-    {
-        var now = DateTime.UtcNow;
-        Time.DeltaTime = (float)(now - lastTick).TotalSeconds;
-        lastTick = now;
-
-        var keys = new List<KeyEvent>();
-        while (Console.KeyAvailable)
-        {
-            var k = Console.ReadKey(true).Key;
-            if (k == ConsoleKey.Escape) return;
-            keys.Add(new KeyEvent(k));
-        }
-
-        Update(keys);
-        Render();
-        Thread.Sleep(16);
-    }
-}
+┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
+│                               │
+│           UI area             │
+│         (main content)        │
+│                               │
+├───────────────────────────────┤
+│  Response / status bar        │
+└───────────────────────────────┘
 ```
 
-**2. Pass key list down the update tree**
-
-```csharp
-private void Update(List<KeyEvent> keys) => UpdateRecursive(root, keys);
-
-private void UpdateRecursive(View view, IReadOnlyList<KeyEvent> keys)
-{
-    if (view is Component c)
-        c.OnUpdate(keys);
-
-    foreach (var child in view.Children)
-        UpdateRecursive(child, keys);
-}
-```
-
-**3. Update `Component.OnUpdate` signature**
-
-```csharp
-// Component.cs
-public virtual void OnUpdate(IReadOnlyList<KeyEvent> keys) { }
-```
-
-`Label` and `NumberCounter` ignore the parameter — no behavior change.
-
----
-
-## Phase 2 — Add color to Cell, Buffer, and Renderer
-
-### Goal
-`Cell` currently holds only a `char`. A selected menu item needs inverted
-colors, so color support must exist at the lowest layer before any interactive
-component can use it.
-
-### What to build
-
-**1. `Cell` gets Foreground and Background**
-
-```csharp
-// Cell.cs
-public struct Cell
-{
-    public char Char;
-    public ConsoleColor Foreground;
-    public ConsoleColor Background;
-
-    public static readonly Cell Empty = new(' ', ConsoleColor.Gray, ConsoleColor.Black);
-
-    public Cell(char c,
-                ConsoleColor fg = ConsoleColor.Gray,
-                ConsoleColor bg = ConsoleColor.Black)
-    {
-        Char = c; Foreground = fg; Background = bg;
-    }
-
-    public override bool Equals(object? obj)
-        => obj is Cell cell
-           && Char       == cell.Char
-           && Foreground == cell.Foreground
-           && Background == cell.Background;
-
-    public override int GetHashCode()
-        => HashCode.Combine(Char, Foreground, Background);
-}
-```
-
-**2. `Buffer.Set` gains color overload**
-
-```csharp
-// Buffer.cs
-public void Set(int x, int y, char c,
-                ConsoleColor fg = ConsoleColor.Gray,
-                ConsoleColor bg = ConsoleColor.Black)
-{
-    if (x < 0 || y < 0 || x >= Width || y >= Height) return;
-    Cells[x, y] = new Cell(c, fg, bg);
-}
-```
-
-`Buffer.Clear()` must fill with `Cell.Empty` (not `new Cell(' ')`), so the
-diff compares color changes on blank cells too.
-
-**3. `Renderer` emits ANSI color codes**
-
-```csharp
-// Renderer.cs
-public static void DiffRender(Buffer back, Buffer front)
-{
-    var sb = new StringBuilder();
-    ConsoleColor lastFg = (ConsoleColor)(-1);
-    ConsoleColor lastBg = (ConsoleColor)(-1);
-
-    for (int y = 0; y < back.Height; y++)
-    for (int x = 0; x < back.Width;  x++)
-    {
-        Cell n = back.Cells[x, y];
-        Cell o = front.Cells[x, y];
-        if (n.Equals(o)) continue;
-
-        sb.Append($"\x1b[{y + 1};{x + 1}H");
-
-        if (n.Foreground != lastFg) { sb.Append(AnsiColor.Fg(n.Foreground)); lastFg = n.Foreground; }
-        if (n.Background != lastBg) { sb.Append(AnsiColor.Bg(n.Background)); lastBg = n.Background; }
-
-        sb.Append(n.Char);
-        front.Cells[x, y] = n;
-    }
-
-    sb.Append("\x1b[0m"); // reset color — stops the shell prompt inheriting colors
-    Console.Write(sb.ToString());
-}
-```
-
-**4. `AnsiColor` helper**
-
-```csharp
-// AnsiColor.cs  (new, TuiEngine.Rendering)
-internal static class AnsiColor
-{
-    private static readonly int[] FgMap = { 30,34,32,36,31,35,33,37,90,94,92,96,91,95,93,97 };
-    private static readonly int[] BgMap = { 40,44,42,46,41,45,43,47,100,104,102,106,101,105,103,107 };
-
-    public static string Fg(ConsoleColor c) => $"\x1b[{FgMap[(int)c]}m";
-    public static string Bg(ConsoleColor c) => $"\x1b[{BgMap[(int)c]}m";
-}
-```
-
-### Why the diff must compare color
-`Cell.Equals` now checks `Char + Foreground + Background`. Moving the cursor
-highlight from item A to item B changes only color on those two cells — the
-diff catches it even though the characters are the same letters.
-
----
-
-## Phase 3 — Focus system with auto-focus (no Tab)
-
-### Goal
-Only the focused component receives keys. There is no global Tab key.
-Instead: if nothing is focused and the player presses a navigation key
-(`Up` or `Down`), the engine automatically focuses the first `Menu` in the tree.
-This means the developer never has to think about "entering" the menu — the
-first keypress does it.
-
-### Why no Tab
-Tab is a web/desktop convention. In a TUI game or tool, you want the **game
-developer** to define what navigation means. Tab as a universal escape hatch
-breaks that contract and causes surprising behavior when the menu has its own
-up/down navigation.
-
-### What to build
-
-**1. `FocusManager` — no Tab, exposes explicit `SetFocus`**
-
-```csharp
-// FocusManager.cs  (new, TuiEngine.UI)
-public static class FocusManager
-{
-    private static readonly List<Component> registered = new();
-    public static Component? Focused { get; private set; }
-
-    public static void Register(Component c)
-    {
-        if (!registered.Contains(c)) registered.Add(c);
-    }
-
-    // Explicit focus — called by Engine or by components themselves
-    public static void SetFocus(Component c)
-    {
-        Focused?.OnBlur();
-        Focused = c;
-        Focused.OnFocus();
-    }
-
-    // Find the first component of type T in registration order
-    public static T? FirstOfType<T>() where T : Component
-        => registered.OfType<T>().FirstOrDefault();
-}
-```
-
-**2. `Component` gets focus lifecycle**
-
-```csharp
-// Component.cs
-public bool IsFocused => FocusManager.Focused == this;
-
-public virtual void OnFocus() { }
-public virtual void OnBlur()  { }
-
-public override void OnMount()
-{
-    FocusManager.Register(this);
-}
-```
-
-**3. Engine auto-focuses the first Menu on navigation key**
-
-```csharp
-// Engine.cs — Update() replaces the previous Tab intercept
-private void Update(List<KeyEvent> keys)
-{
-    // Auto-focus: if nothing is focused and a navigation key arrives,
-    // give focus to the first Menu in the tree automatically.
-    if (FocusManager.Focused == null && keys.Count > 0)
-    {
-        var firstMenu = FocusManager.FirstOfType<Menu>();
-        if (firstMenu != null)
-            FocusManager.SetFocus(firstMenu);
-    }
-
-    UpdateRecursive(root, keys);
-}
-
-private void UpdateRecursive(View view, IReadOnlyList<KeyEvent> keys)
-{
-    if (view is Component c)
-    {
-        // Non-focused components receive an empty key list
-        c.OnUpdate(c.IsFocused ? keys : Array.Empty<KeyEvent>());
-    }
-
-    foreach (var child in view.Children)
-        UpdateRecursive(child, keys);
-}
-```
-
-**4. Mount all components on startup**
-
-```csharp
-// Engine constructor
-public Engine(View root)
-{
-    this.root = root;
-    // ... buffer init
-    MountRecursive(root); // registers every Component with FocusManager
-}
-
-private void MountRecursive(View view)
-{
-    if (view is Component c) c.OnMount();
-    foreach (var child in view.Children)
-        MountRecursive(child);
-}
-```
-
-On the first frame with no focus, the first `Up` or `Down` press triggers
-auto-focus on the `Menu`. After that, the `Menu` handles its own navigation.
-
----
-
-## Phase 4 — MenuKeys struct + Selectable
-
-### Goal
-The developer is **forced** to declare what keys drive a menu. There is no
-default. If you forget `MenuKeys`, the code does not compile. This matches how
-Unity forces you to assign an `InputAction` asset — the engine will not guess.
-
-### What to build
-
-**1. `MenuKeys` — required, no defaults**
-
-```csharp
-// MenuKeys.cs  (new, TuiEngine.UI)
-public readonly struct MenuKeys
-{
-    public ConsoleKey Up     { get; init; }
-    public ConsoleKey Down   { get; init; }
-    public ConsoleKey Select { get; init; }
-
-    // Constructor — all three fields required at the call site
-    public MenuKeys(ConsoleKey up, ConsoleKey down, ConsoleKey select)
-    {
-        Up     = up;
-        Down   = down;
-        Select = select;
-    }
-
-    // Convenience preset — opt-in, not the default path
-    public static MenuKeys ArrowKeys
-        => new(ConsoleKey.UpArrow, ConsoleKey.DownArrow, ConsoleKey.Enter);
-}
-```
-
-Usage in code:
-```csharp
-// Explicit — developer picks the keys
-new Menu(new MenuKeys(ConsoleKey.W, ConsoleKey.S, ConsoleKey.Enter), ...)
-
-// Or use the preset when arrows make sense
-new Menu(MenuKeys.ArrowKeys, ...)
-```
-
-**2. `Selectable` — base for interactive components**
-
-```csharp
-// Selectable.cs  (new, TuiEngine.UI)
-public abstract class Selectable : Component
-{
-    public Action? OnClick { get; set; }
-
-    protected ConsoleColor NormalFg  = ConsoleColor.Gray;
-    protected ConsoleColor NormalBg  = ConsoleColor.Black;
-    protected ConsoleColor SelectedFg = ConsoleColor.Black;
-    protected ConsoleColor SelectedBg = ConsoleColor.White;
-}
-```
-
-`Selectable` does not handle input itself — the `Menu` that contains it does.
-This way a `MenuItem` never needs to know what keys are in play.
-
-**3. `MenuItem`**
-
-```csharp
-// MenuItem.cs  (new, TuiEngine.UI)
-public class MenuItem : Selectable
-{
-    public string Label { get; }
-    private bool isSelected;
-
-    public MenuItem(string label, Action? onClick = null)
-    {
-        Label   = label;
-        OnClick = onClick;
-    }
-
-    // Called by Menu — not by FocusManager
-    public void SetSelected(bool value)
-    {
-        if (isSelected == value) return;
-        isSelected = value;
-        MarkDirty();
-    }
-
-    public override void Draw(Buffer buffer, int x, int y)
-    {
-        var fg = isSelected ? SelectedFg : NormalFg;
-        var bg = isSelected ? SelectedBg : NormalBg;
-
-        // Solid background fill for the whole item width
-        for (int i = 0; i < Label.Length + 2; i++)
-            buffer.Set(x + i, y, ' ', fg, bg);
-
-        // Label with 1-char left padding
-        for (int i = 0; i < Label.Length; i++)
-            buffer.Set(x + 1 + i, y, Label[i], fg, bg);
-    }
-}
-```
-
----
-
-## Phase 5 — Menu component
-
-### Goal
-`Menu` owns navigation. It receives `MenuKeys` at construction (compile error
-if omitted), moves the selection with the declared keys, and fires `OnClick`
-on the selected item.
-
-### What to build
-
-**1. `Menu`**
-
-```csharp
-// Menu.cs  (new, TuiEngine.UI)
-public class Menu : Component
-{
-    private readonly List<MenuItem> items;
-    private readonly MenuKeys keys;           // <-- required at construction
-    private int selectedIndex = 0;
-
-    // MenuKeys is the first argument — impossible to forget
-    public Menu(MenuKeys keys, params MenuItem[] menuItems)
-    {
-        this.keys  = keys;
-        this.items = new List<MenuItem>(menuItems);
-
-        foreach (var item in items)
-            Add(item); // items are children so View.Render traverses them
-    }
-
-    public override void OnFocus()
-    {
-        // Highlight item 0 the moment the menu receives focus
-        SyncSelection();
-    }
-
-    public override void OnBlur()
-    {
-        // Clear all highlights when focus leaves
-        foreach (var item in items)
-            item.SetSelected(false);
-    }
-
-    public override void OnUpdate(IReadOnlyList<KeyEvent> frameKeys)
-    {
-        foreach (var key in frameKeys)
-        {
-            if      (key.Key == keys.Up)     MoveSelection(-1);
-            else if (key.Key == keys.Down)   MoveSelection(+1);
-            else if (key.Key == keys.Select) items[selectedIndex].OnClick?.Invoke();
-        }
-    }
-
-    public override void Draw(Buffer buffer, int x, int y)
-    {
-        // Menu itself is invisible — only its MenuItem children draw
-    }
-
-    private void MoveSelection(int delta)
-    {
-        selectedIndex = (selectedIndex + delta + items.Count) % items.Count;
-        SyncSelection();
-        MarkDirty();
-    }
-
-    private void SyncSelection()
-    {
-        for (int i = 0; i < items.Count; i++)
-            items[i].SetSelected(i == selectedIndex);
-    }
-}
-```
-
-**2. Final usage**
-
-```csharp
-// Program.cs
-Tui.Run(
-    new Label("=== Main Menu ==="),
-    new Menu(
-        MenuKeys.ArrowKeys,                          // explicit — or pass custom keys
-        new MenuItem("New game",  () => StartGame()),
-        new MenuItem("Load game", () => LoadGame()),
-        new MenuItem("Options",   () => OpenOptions()),
-        new MenuItem("Quit",      () => Environment.Exit(0))
-    )
-);
-```
-
-First arrow key press → engine auto-focuses `Menu` → `OnFocus` highlights
-item 0 → `Up`/`Down` move the selection → `Enter` fires the action.
-No Tab required anywhere.
-
----
-
-## Phase 6 — Two-zone layout (UI area + status bar)
-
-### Goal
-Match the sketch: a main UI zone at the top and a single-line status bar at
-the bottom that shows the result of the last action — without callback output
-bleeding into the render buffer via `Console.WriteLine`.
-
-### The problem with raw Console.WriteLine in callbacks
-When a `MenuItem` callback calls `Console.WriteLine`, it writes directly to
-stdout during the engine loop. The next `DiffRender` call overwrites that
-line with whatever the buffer says should be there — or worse, the text
-appears mid-frame and is then overwritten incorrectly. The fix is to never
-write to the console from a callback. Instead, callbacks post a message to a
-`StatusBar` component that owns that region of the buffer.
+The response bar is a dedicated screen region the engine controls.
+Callbacks write a message there — not to `Console.WriteLine`.
 
 ### What to build
 
 **1. `StatusBar` component**
 
 ```csharp
-// StatusBar.cs  (new, TuiEngine.UI)
+// StatusBar.cs  (new file, TuiEngine.UI)
 public class StatusBar : Component
 {
-    private string message = string.Empty;
-
-    // Static so callbacks can post to it without a reference chain
-    public static StatusBar? Instance { get; private set; }
-
-    public StatusBar()
-    {
-        Instance = this;
-    }
+    private string message = "";
 
     public void Post(string msg)
     {
@@ -562,104 +77,471 @@ public class StatusBar : Component
 
     public override void Draw(Buffer buffer, int x, int y)
     {
-        // Clear the row first
+        // Fill the row with the bar background
         for (int i = 0; i < buffer.Width; i++)
             buffer.Set(x + i, y, ' ', ConsoleColor.Black, ConsoleColor.DarkGray);
 
-        // Write message
-        for (int i = 0; i < Math.Min(message.Length, buffer.Width - x); i++)
-            buffer.Set(x + i, y, message[i], ConsoleColor.White, ConsoleColor.DarkGray);
+        // Write the message text
+        for (int i = 0; i < Math.Min(message.Length, buffer.Width - 2); i++)
+            buffer.Set(x + 1 + i, y, message[i], ConsoleColor.White, ConsoleColor.DarkGray);
     }
 }
 ```
 
-**2. Callbacks post to StatusBar instead of writing to console**
-
-```csharp
-// Program.cs — callbacks use StatusBar.Instance, not Console.WriteLine
-Tui.Run(
-    new Label("=== Main Menu ==="),
-    new Menu(
-        MenuKeys.ArrowKeys,
-        new MenuItem("New game",  () => StatusBar.Instance?.Post("Starting new game...")),
-        new MenuItem("Load game", () => StatusBar.Instance?.Post("Loading game...")),
-        new MenuItem("Options",   () => StatusBar.Instance?.Post("Opening options...")),
-        new MenuItem("Quit",      () => Environment.Exit(0))
-    ),
-    new StatusBar()
-);
-```
-
-**3. Two-zone layout in `View.Render`**
-
-Right now all children stack with `offsetY += 1`. For the status bar to sit
-at the bottom, `View.Render` needs to know the terminal height. The minimal
-change: give `RootView` two named slots — content and footer:
-
-```csharp
-// RootView.cs
-internal class RootView : View
-{
-    public View Content { get; }    // renders top-down from y = 0
-    public StatusBar? Footer { get; set; }  // renders at Terminal.Height - 1
-
-    public RootView(View content)
-    {
-        Content = content;
-        Add(content);
-    }
-
-    public override void Render(Buffer buffer, int x, int y)
-    {
-        buffer.Clear();
-        Content.Render(buffer, x, 0);
-
-        if (Footer != null)
-            Footer.Render(buffer, x, buffer.Height - 1);
-    }
-}
-```
-
-`Tui.Run` separates the last `StatusBar` child out into `RootView.Footer`
-automatically:
+**2. `Tui.Run` pins the StatusBar to the last row**
 
 ```csharp
 // Tui.cs
-public static void Run(params View[] rootChildren)
+public static class Tui
 {
-    var content = new View(); // anonymous grouping view
-    StatusBar? footer = null;
+    public static StatusBar StatusBar { get; private set; } = new();
 
-    foreach (var child in rootChildren)
+    public static void Run(params View[] rootChildren)
     {
-        if (child is StatusBar sb) footer = sb;
-        else content.Add(child);
+        var root = new RootView();
+        root.Add(rootChildren);
+        root.Add(StatusBar);   // always last — engine pins it to bottom row in RootView
+
+        var engine = new Engine(root);
+        engine.Run();
+    }
+}
+```
+
+**3. `RootView` pins the last child to the bottom row**
+
+```csharp
+// RootView.cs
+public override void Render(Buffer buffer, int x, int y)
+{
+    buffer.Clear();
+
+    // Render all children except the last normally
+    for (int i = 0; i < Children.Count - 1; i++)
+        Children[i].Render(buffer, x, y + i);
+
+    // Pin the last child (StatusBar) to the bottom row
+    Children[^1].Render(buffer, x, buffer.Height - 1);
+}
+```
+
+**4. Callbacks now call `Tui.StatusBar.Post(...)` instead of `Console.WriteLine`**
+
+```csharp
+// Program.cs
+Tui.Run(
+    new Label("=== Main Menu ==="),
+    new Menu(
+        MenuKeys.Arrows(ConsoleKey.Enter),
+        new MenuItem("New game",  () => Tui.StatusBar.Post("Starting new game...")),
+        new MenuItem("Load game", () => Tui.StatusBar.Post("Loading game...")),
+        new MenuItem("Options",   () => Tui.StatusBar.Post("Opening options...")),
+        new MenuItem("Quit",      () => Environment.Exit(0))
+    )
+);
+```
+
+### Rule to document for your project
+> After `Tui.Run()` is called, `Console.Write` and `Console.WriteLine` are forbidden.
+> All output must go through `Buffer`, `StatusBar.Post`, or a dedicated UI component.
+
+---
+
+## Phase 7 — Developer-defined keybinds; remove Tab entirely
+
+### The problem
+Tab is a global engine shortcut the developer never asked for. Arrow keys are hardcoded in `Menu`.
+A game developer building a VI-style interface wants `hjkl`. A developer targeting a numpad wants
+`8` and `2`. They currently have no say.
+
+### What to build
+
+**1. `MenuKeys` — a required config struct**
+
+```csharp
+// MenuKeys.cs  (new file, TuiEngine.UI)
+public readonly struct MenuKeys
+{
+    public ConsoleKey Up     { get; }
+    public ConsoleKey Down   { get; }
+    public ConsoleKey Select { get; }
+
+    public MenuKeys(ConsoleKey up, ConsoleKey down, ConsoleKey select)
+    {
+        Up     = up;
+        Down   = down;
+        Select = select;
     }
 
-    var root = new RootView(content);
-    root.Footer = footer;
+    // Convenience factory — the most common case
+    public static MenuKeys Arrows(ConsoleKey select = ConsoleKey.Enter)
+        => new(ConsoleKey.UpArrow, ConsoleKey.DownArrow, select);
 
-    new Engine(root).Run();
+    // VI keys
+    public static MenuKeys Vi(ConsoleKey select = ConsoleKey.Enter)
+        => new(ConsoleKey.K, ConsoleKey.J, select);
+
+    // Numpad
+    public static MenuKeys Numpad(ConsoleKey select = ConsoleKey.Enter)
+        => new(ConsoleKey.NumPad8, ConsoleKey.NumPad2, select);
 }
+```
+
+**2. `Menu` constructor requires `MenuKeys` — it cannot be created without them**
+
+```csharp
+// Menu.cs — updated constructor signature
+public class Menu : Component
+{
+    private readonly MenuKeys keys;
+    private readonly List<MenuItem> items;
+    private int selectedIndex = 0;
+
+    // The developer MUST pass keys — no default, no overload without them
+    public Menu(MenuKeys keys, params MenuItem[] menuItems)
+    {
+        this.keys = keys;
+        items = new List<MenuItem>(menuItems);
+        foreach (var item in items) Add(item);
+    }
+
+    public override void OnUpdate(IReadOnlyList<KeyEvent> keyEvents)
+    {
+        foreach (var e in keyEvents)
+        {
+            if      (e.Key == keys.Up)     MoveSelection(-1);
+            else if (e.Key == keys.Down)   MoveSelection(+1);
+            else if (e.Key == keys.Select) items[selectedIndex].OnClick?.Invoke();
+        }
+        MarkDirty();
+    }
+
+    private void MoveSelection(int delta)
+    {
+        selectedIndex = (selectedIndex + delta + items.Count) % items.Count;
+        SyncSelection();
+    }
+    // ... rest unchanged
+}
+```
+
+**3. Remove Tab from `FocusManager` and `Engine` completely**
+
+```csharp
+// Engine.cs — delete the Tab intercept block entirely
+private void Update(List<KeyEvent> keys)
+{
+    // No more Tab handling here.
+    // Focus is driven entirely by directional input (Phase 8).
+    UpdateRecursive(root, keys);
+}
+```
+
+`FocusManager.CycleNext()` can stay on the class for programmatic use, but the engine never
+calls it automatically anymore.
+
+### What the developer API looks like now
+
+```csharp
+// Arrow keys + Enter  (most common)
+new Menu(MenuKeys.Arrows(), ...)
+
+// VI-style
+new Menu(MenuKeys.Vi(), ...)
+
+// Custom
+new Menu(new MenuKeys(ConsoleKey.W, ConsoleKey.S, ConsoleKey.Spacebar), ...)
+```
+
+The compiler enforces the contract. A `Menu` without keybinds does not compile.
+
+---
+
+## Phase 8 — Input-driven focus (enter menu on first arrow press)
+
+### The problem
+Right now focus only moves via Tab (which Phase 7 removes) or by explicit `FocusManager` calls.
+The desired behavior from your notes:
+
+> "If from the start the first down or up option will react to the first menu — as in you are
+> going into the menu instead of using other elements."
+
+This means: **pressing a navigation key that matches any registered menu should automatically
+focus that menu**, without the developer or user needing to do anything first.
+
+### Design
+
+When a key event arrives and no component is focused, the engine should ask each registered menu
+"is this one of your navigation keys?" — and if so, give that menu focus immediately.
+
+**1. Add `IKeyFocusable` interface**
+
+```csharp
+// IKeyFocusable.cs  (new file, TuiEngine.UI)
+// A component that can claim focus in response to a specific key
+public interface IKeyFocusable
+{
+    bool ClaimsKey(ConsoleKey key);
+}
+```
+
+**2. `Menu` implements `IKeyFocusable`**
+
+```csharp
+// Menu.cs — add interface
+public class Menu : Component, IKeyFocusable
+{
+    public bool ClaimsKey(ConsoleKey key)
+        => key == keys.Up || key == keys.Down;
+    // ...
+}
+```
+
+**3. `Engine` does a focus-claim pass before distributing keys**
+
+```csharp
+// Engine.cs
+private void Update(List<KeyEvent> keyEvents)
+{
+    // If nothing is focused and a key arrives, let any IKeyFocusable claim it
+    if (FocusManager.Focused == null && keyEvents.Count > 0)
+    {
+        foreach (var key in keyEvents)
+        {
+            var claimer = FindKeyFocusable(root, key.Key);
+            if (claimer != null)
+            {
+                FocusManager.SetFocus(claimer);
+                break;   // first claimant wins
+            }
+        }
+    }
+
+    UpdateRecursive(root, keyEvents);
+}
+
+private Component? FindKeyFocusable(View view, ConsoleKey key)
+{
+    if (view is IKeyFocusable kf && view is Component c && kf.ClaimsKey(key))
+        return c;
+
+    foreach (var child in view.Children)
+    {
+        var result = FindKeyFocusable(child, key);
+        if (result != null) return result;
+    }
+    return null;
+}
+```
+
+**4. Add `FocusManager.SetFocus`**
+
+```csharp
+// FocusManager.cs
+public static void SetFocus(Component c)
+{
+    Focused?.OnBlur();
+    // Find and set by reference
+    index = focusable.IndexOf(c);
+    if (index < 0) { Register(c); index = focusable.Count - 1; }
+    Focused?.OnFocus();
+}
+```
+
+### What this feels like in practice
+
+```
+App starts — no component has focus.
+
+User presses DownArrow.
+→ Engine finds Menu (first IKeyFocusable that claims DownArrow).
+→ FocusManager.SetFocus(menu).
+→ menu.OnFocus() fires → selectedIndex = 0, first item highlights.
+→ That same DownArrow is then passed to OnUpdate → moves to item 1.
+
+User presses UpArrow.
+→ Menu already has focus → moves selection up.
+
+User presses Enter.
+→ Fires selected item's OnClick.
+```
+
+No Tab. No explicit focus call. The first directional key just works.
+
+---
+
+## Phase 9 — Unity UI Toolkit-style declarative API
+
+### The problem
+The current call pattern:
+
+```csharp
+Tui.Run(
+    new Label("=== Main Menu ==="),
+    new Menu(
+        MenuKeys.Arrows(),
+        new MenuItem("New game", () => ...),
+        new MenuItem("Quit",     () => ...)
+    )
+);
+```
+
+This is close, but in Unity UI Toolkit, a visual element carries a **style config** as a separate
+object (USS), and data is bound to the element declaratively — you do not pass data through the
+constructor. The goal is to separate **what it looks like** from **what it does** from
+**what data it shows**.
+
+### What to build
+
+**1. `MenuStyle` — visual config separated from behavior**
+
+```csharp
+// MenuStyle.cs  (new file, TuiEngine.UI)
+public class MenuStyle
+{
+    public ConsoleColor NormalFg    { get; init; } = ConsoleColor.Gray;
+    public ConsoleColor NormalBg    { get; init; } = ConsoleColor.Black;
+    public ConsoleColor SelectedFg  { get; init; } = ConsoleColor.Black;
+    public ConsoleColor SelectedBg  { get; init; } = ConsoleColor.White;
+    public string       Prefix      { get; init; } = " ";   // shown before each item
+    public string       SelectedPrefix { get; init; } = "►"; // shown before selected item
+
+    public static readonly MenuStyle Default = new();
+}
+```
+
+**2. `Menu` accepts an optional `MenuStyle`**
+
+```csharp
+public Menu(MenuKeys keys, MenuStyle? style = null, params MenuItem[] menuItems)
+{
+    this.keys  = keys;
+    this.style = style ?? MenuStyle.Default;
+    // ...
+}
+```
+
+**3. `MenuItem` uses `MenuItemConfig` — data-binding style**
+
+Instead of passing label + callback directly, the developer defines a config object and the
+component reads from it. This mirrors how Unity's `Label.bindingPath` works.
+
+```csharp
+// MenuItemConfig.cs  (new file, TuiEngine.UI)
+public class MenuItemConfig
+{
+    public string Label   { get; set; } = "";
+    public Action? OnClick { get; set; }
+}
+
+// MenuItem.cs — bind to a config
+public class MenuItem : Selectable
+{
+    private readonly MenuItemConfig config;
+
+    public MenuItem(MenuItemConfig config)
+    {
+        this.config = config;
+        OnClick = () => config.OnClick?.Invoke();
+    }
+
+    // Convenience — lets you still write new MenuItem("Quit", () => ...)
+    public MenuItem(string label, Action? onClick = null)
+        : this(new MenuItemConfig { Label = label, OnClick = onClick }) { }
+
+    public string Label => config.Label;
+}
+```
+
+Now a developer can hold a reference to the config and mutate it at runtime — the component
+automatically reflects the change on the next draw (because `MarkDirty` is called when the
+buffer is written):
+
+```csharp
+var saveConfig = new MenuItemConfig { Label = "Continue", OnClick = ContinueGame };
+
+Tui.Run(
+    new Menu(
+        MenuKeys.Arrows(),
+        MenuStyle.Default,
+        new MenuItem(saveConfig),
+        new MenuItem("New game",  () => Tui.StatusBar.Post("New game")),
+        new MenuItem("Quit",      () => Environment.Exit(0))
+    )
+);
+
+// Later — mutate the config; the menu re-draws automatically
+saveConfig.Label   = "Continue (slot 3)";
+saveConfig.OnClick = () => LoadSlot(3);
+```
+
+This is the Unity data-binding pattern: **the config is the model, the component is the view**.
+
+**4. Full usage showing all four phases together**
+
+```csharp
+// Program.cs
+var saveSlot = new MenuItemConfig { Label = "Continue", OnClick = () => Load() };
+
+Tui.Run(
+    new Label("=== Main Menu ==="),
+    new Menu(
+        keys:  MenuKeys.Arrows(ConsoleKey.Enter),
+        style: new MenuStyle
+        {
+            SelectedFg     = ConsoleColor.Yellow,
+            SelectedBg     = ConsoleColor.DarkBlue,
+            SelectedPrefix = "► "
+        },
+        new MenuItem(saveSlot),
+        new MenuItem("New game",  () => Tui.StatusBar.Post("Starting...")),
+        new MenuItem("Options",   () => Tui.StatusBar.Post("Options...")),
+        new MenuItem("Quit",      () => Environment.Exit(0))
+    )
+);
 ```
 
 ---
 
-## Summary — build order and files changed
+## Summary — what each phase gives you
 
-| Phase | New files | Changed files |
-|---|---|---|
-| 1 — Input routing | — | `Engine.cs`, `Component.cs` |
-| 2 — Color | `AnsiColor.cs` | `Cell.cs`, `Buffer.cs`, `Renderer.cs` |
-| 3 — Focus (no Tab) | `FocusManager.cs` | `Component.cs`, `Engine.cs` |
-| 4 — MenuKeys + Selectable | `MenuKeys.cs`, `Selectable.cs`, `MenuItem.cs` | — |
-| 5 — Menu | `Menu.cs` | — |
-| 6 — Layout + StatusBar | `StatusBar.cs` | `RootView.cs`, `Tui.cs` |
+| Phase | Removes | Adds | Key file |
+|---|---|---|---|
+| 6 — StatusBar | `Console.WriteLine` in callbacks | `StatusBar`, pinned bottom row in `RootView` | `StatusBar.cs` |
+| 7 — MenuKeys | Global Tab, hardcoded arrow keys | `MenuKeys` struct, required constructor param | `MenuKeys.cs` |
+| 8 — Input focus | Manual focus bootstrap | `IKeyFocusable`, auto-claim on first arrow press | `IKeyFocusable.cs` |
+| 9 — Declarative API | Constructor-heavy style | `MenuStyle`, `MenuItemConfig` data binding | `MenuStyle.cs`, `MenuItemConfig.cs` |
 
-### Test at each phase
-- After Phase 1: `NumberCounter` now increments correctly with real delta time.
-- After Phase 2: Pass a color to any `Label` — it renders with that color.
-- After Phase 3: First `Down` press auto-focuses the `Menu`. No Tab needed.
-- After Phase 4: `new Menu(MenuKeys.ArrowKeys, ...)` compiles; omitting `MenuKeys` does not.
-- After Phase 5: Full arrow key navigation + Enter fires actions.
-- After Phase 6: Action results appear in the status bar at the bottom; no raw `Console.WriteLine` in the tree.
+### New files added across both roadmaps
+
+```
+TuiEngine/
+  Core/
+    Engine.cs          (modified every phase)
+    Time.cs
+    Tui.cs             (Phase 6: StatusBar property)
+  Input/
+    InputHandler.cs
+    KeyEvent.cs
+  Rendering/
+    AnsiColor.cs       (Roadmap 1 Phase 2)
+    Buffer.cs
+    Cell.cs
+    Renderer.cs
+    Terminal.cs
+  UI/
+    Component.cs
+    FocusManager.cs    (Roadmap 1 Phase 3)
+    IKeyFocusable.cs   ← Phase 8
+    Label.cs
+    Menu.cs            ← Phase 5 + updated each phase
+    MenuItemConfig.cs  ← Phase 9
+    MenuKeys.cs        ← Phase 7
+    MenuItem.cs        ← Phase 4 + updated
+    MenuStyle.cs       ← Phase 9
+    NumberCounter.cs
+    RootView.cs        (Phase 6: pin bottom row)
+    Selectable.cs      (Roadmap 1 Phase 4)
+    StatusBar.cs       ← Phase 6
+    View.cs
+```

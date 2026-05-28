@@ -10,7 +10,7 @@ public class Menu : Component
     private readonly List<MenuItem> items;
     private int selectedIndex = 0;
 
-    public Menu(params MenuItem[] menuItems)
+    public Menu(Abstract.MenuKeys menuKeys, params MenuItem[] menuItems)
     {
         items = new List<MenuItem>(menuItems);
         // Register items as children so View.Render traverses them
