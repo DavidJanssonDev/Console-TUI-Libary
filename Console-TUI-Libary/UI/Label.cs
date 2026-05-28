@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using TuiEngine.Core;
+using TuiEngine.Input;
 using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.UI;
@@ -29,7 +30,7 @@ public class Label : Component
         Text = text;
     }
     
-    public override void OnUpdate()
+    public override void OnUpdate(IReadOnlyList<KeyEvent> keys)
     {
         // static label → nothing needed
     }

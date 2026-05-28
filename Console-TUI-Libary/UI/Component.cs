@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using TuiEngine.Input;
 
 namespace TuiEngine.UI;
 public abstract class Component : View
@@ -9,7 +10,7 @@ public abstract class Component : View
 
     public virtual void OnMount() { }
 
-    public virtual void OnUpdate() { }
+    public virtual void OnUpdate(IReadOnlyList<KeyEvent> keys) { }
 
     protected void MarkDirty()
     {

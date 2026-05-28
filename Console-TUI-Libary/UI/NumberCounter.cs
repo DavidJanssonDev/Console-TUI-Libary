@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using TuiEngine.Input;
 using Buffer = TuiEngine.Rendering.Buffer;
 
 namespace TuiEngine.UI;
@@ -12,7 +13,7 @@ public class NumberCounter : Component
     private string cached;
 
 
-    public override void OnUpdate()
+    public override void OnUpdate(IReadOnlyList<KeyEvent> _)
     {
         value++;
 
