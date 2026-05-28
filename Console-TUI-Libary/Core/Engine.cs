@@ -4,6 +4,7 @@ using System.Text;
 using TuiEngine.Input;
 using TuiEngine.Rendering;
 using TuiEngine.UI;
+using TuiEngine.UI.Manager;
 using Buffer = TuiEngine.Rendering.Buffer;
 namespace TuiEngine.Core;
 
@@ -20,7 +21,8 @@ internal class Engine
     public Engine(View root)
     {
         this.root = root;
-
+        MountRecursive(root);
+        FocusManager.Focused?.OnFocus();
         int width = Console.WindowWidth;
         int height = Console.WindowHeight;
 
@@ -65,15 +67,37 @@ internal class Engine
         Renderer.DiffRender(back, front);
     }
 
-    private void Update(List<KeyEvent> keys) => UpdateRecursive(root, keys);
-    
+    #region UPDATE
+    private void Update(List<KeyEvent> keys)
+    {
+        // Tab is a global navigation key - handle it before any component sees it 
+        if (keys.Any(k => k.Key == ConsoleKey.Tab))
+            FocusManager.CycleNext();
 
-    private void UpdateRecursive(View view, List<KeyEvent> keys)
+        var filtered = keys.Where(k => k.Key != ConsoleKey.Tab).ToList();
+        UpdateRecursive(root, filtered);
+    }
+
+    private void UpdateRecursive(View view, IReadOnlyList<KeyEvent> keys)
     {
         if (view is Component c)
-            c.OnUpdate(keys);
+        {
+            var componentKeys = c.IsFocused ? keys : Array.Empty<KeyEvent>();
+            c.OnUpdate(componentKeys);
+        }
 
         foreach (View child in view.Children) 
             UpdateRecursive(child, keys);
     }
+    #endregion
+
+    #region MOUNT COMPONENTS
+    private void MountRecursive(View view)
+    {
+        if (view is Component c) c.OnMount();
+        foreach (View child in view.Children)
+            MountRecursive(child);
+    }
+    #endregion 
+
 }
